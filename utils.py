@@ -5,8 +5,11 @@ import math
 import json
 import logging
 import numpy as np
-from PIL import Image
+import Image
+from PIL import Image, ImageEnhance
 from datetime import datetime
+import base64
+from color_pencil import color_draw
 
 def prepare_dirs_and_logger(config):
     formatter = logging.Formatter("%(asctime)s:%(levelname)s::%(message)s")
@@ -74,9 +77,38 @@ def make_grid(tensor, nrow=8, padding=2,
             k = k + 1
     return grid
 
-def save_image(tensor, filename, nrow=8, padding=2,
-               normalize=False, scale_each=False):
+def save_image2(tensor, filename, nrow=8, padding=0,normalize=False, scale_each=False):
+    ndarr = make_grid(tensor, nrow=nrow, padding=padding,
+                            normalize=normalize, scale_each=scale_each)
+    ndarr=np.asarray(ndarr,dtype='uint8')
+    img = Image.fromarray(ndarr)
+    
+    enhancer = ImageEnhance.Sharpness(img)
+    img = enhancer.enhance(3.3)
+
+    enhancer = ImageEnhance.Color(img)
+    img = enhancer.enhance(1.8)
+    print(img.size)
+
+    colorpencil, sketch = color_draw(img)
+    img=Image.fromarray(np.concatenate((img,colorpencil,sketch),axis=0))
+    img.save('temp.png','png')
+    with open('temp.png',"rb") as f:
+        imagestring=base64.encodestring(f.read())
+    #imagestring=base64.encodestring(im)
+    #print(imagestring)
+    return imagestring
+
+def save_image(tensor, filename, nrow=8, padding=2,normalize=False, scale_each=False):
     ndarr = make_grid(tensor, nrow=nrow, padding=padding,
                             normalize=normalize, scale_each=scale_each)
     im = Image.fromarray(ndarr)
+
+    enhancer = ImageEnhance.Sharpness(im)
+    im = enhancer.enhance(3.3)
+
+    enhancer = ImageEnhance.Color(im)
+    im = enhancer.enhance(1.8)
+
     im.save(filename)
+    

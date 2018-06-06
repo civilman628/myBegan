@@ -82,7 +82,7 @@ def check_link(in_dir, basename, out_dir):
         os.symlink(rel_link, link_file)
 
 def add_splits(base_path):
-    data_path = os.path.join(base_path, 'CelebA')
+    data_path = os.path.join(base_path, 'dresses')
     images_path = os.path.join(data_path, 'images')
     train_dir = os.path.join(data_path, 'splits', 'train')
     valid_dir = os.path.join(data_path, 'splits', 'valid')
@@ -95,9 +95,9 @@ def add_splits(base_path):
         os.makedirs(test_dir)
 
     # these constants based on the standard CelebA splits
-    NUM_EXAMPLES = 202599
-    TRAIN_STOP = 162770
-    VALID_STOP = 182637
+    NUM_EXAMPLES = 24031    #202599
+    TRAIN_STOP = 23000   #162770
+    VALID_STOP = 23500  #182637
 
     for i in range(0, TRAIN_STOP):
         basename = "{:06d}.jpg".format(i+1)
@@ -111,6 +111,6 @@ def add_splits(base_path):
 
 if __name__ == '__main__':
     base_path = './data'
-    prepare_data_dir()
-    download_celeb_a(base_path)
+    #prepare_data_dir()
+    #download_celeb_a(base_path)
     add_splits(base_path)

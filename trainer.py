@@ -1,6 +1,11 @@
 from __future__ import print_function
 
 import os
+import sys
+import base64
+
+import cv2
+import Image
 import StringIO
 import scipy.misc
 import numpy as np
@@ -11,6 +16,9 @@ from collections import deque
 
 from models import *
 from utils import save_image
+from utils import save_image2
+
+
 
 def next(loader):
     return loader.next()[0].data.numpy()
@@ -104,10 +112,11 @@ class Trainer(object):
                                 ready_for_local_init_op=None)
 
         gpu_options = tf.GPUOptions(allow_growth=True)
-        sess_config = tf.ConfigProto(allow_soft_placement=True,
-                                    gpu_options=gpu_options)
+        sess_config = tf.ConfigProto(allow_soft_placement=True,gpu_options=gpu_options)
 
-        self.sess = sv.prepare_or_wait_for_session(config=sess_config)
+        #sess_config=tf.ConfigProto(device_count={'GPU':0}, allow_soft_placement=True,log_device_placement=False)
+
+        self.sess = sv.prepare_or_wait_for_session(config=sess_config,max_wait_secs=20)
 
         if not self.is_train:
             # dirty way to bypass graph finilization error
@@ -166,7 +175,7 @@ class Trainer(object):
     def build_model(self):
         self.x = self.data_loader
         x = norm_img(self.x)
-
+        
         self.z = tf.random_uniform(
                 (tf.shape(x)[0], self.z_num), minval=-1.0, maxval=1.0)
         self.k_t = tf.Variable(0., trainable=False, name='k_t')
@@ -272,7 +281,7 @@ class Trainer(object):
     def decode(self, z):
         return self.sess.run(self.AE_x, {self.D_z: z})
 
-    def interpolate_G(self, real_batch, step=0, root_path='.', train_epoch=0):
+    def interpolate_G(self, real_batch, step=0, root_path='.', train_epoch=1):
         batch_size = len(real_batch)
         half_batch_size = int(batch_size/2)
 
@@ -299,6 +308,8 @@ class Trainer(object):
         batch_generated = np.reshape(generated, [all_img_num] + list(generated.shape[2:]))
         save_image(batch_generated, os.path.join(root_path, 'test{}_interp_G.png'.format(step)), nrow=10)
 
+
+
     def interpolate_D(self, real1_batch, real2_batch, step=0, root_path="."):
         real1_encode = self.encode(real1_batch)
         real2_encode = self.encode(real2_batch)
@@ -314,11 +325,66 @@ class Trainer(object):
             img = np.concatenate([[real1_batch[idx]], img, [real2_batch[idx]]], 0)
             save_image(img, os.path.join(root_path, 'test{}_interp_D_{}.png'.format(step, idx)), nrow=10 + 2)
 
+    def interpolate_D3(self, real1_batch, step=0,root_path=".",dim=0, num_image=10, max_range=20):
+        real1_encode = self.encode(real1_batch)
+        print(real1_encode[1,0:10])
+        #real2_encode = self.encode(real2_batch)
+        real1_encode_target=np.copy(real1_encode)
+        #real1_encode_target[1,dim-1]=real1_encode_target[1,dim-1]+max_range*(1.0/num_image)
+        
+        #real1_encode_target[1,dim]=real1_encode_target[1,dim]+direction*max_range
+        #print(real1_encode_target.shape)
+        #real1_encode_target[1]=real1_encode_target[1] - real1_encode_target[1]*0.9 #np.random.rand(10)*max_range
+        #print(real1_encode_target[0,0:10])
+        #print('====')
+
+        decodes = []
+        for idx, ratio in enumerate(np.linspace(0, 1, num_image)):
+            #z = np.stack([slerp(ratio, r1, r2) for r1, r2 in zip(real1_encode, real1_encode_target)])
+            #print(idx)
+            #real1_encode_target[0,dim]=real1_encode_target[0,dim]+max_range*(idx*1.0/num_image)*direction
+            real1_encode_target[1,dim-1]=real1_encode_target[1,dim-1]+max_range*(idx*1.0/num_image)
+            z=real1_encode_target
+            #print(z[1,0:10])
+            #sprint('---')
+            #print(z[0,0:10])
+            z_decode = self.decode(z)
+            #test_image=Image.fromarray(np.asarray(z_decode[0,:,:,:],dtype='uint8'))
+            #test_image.show()
+            decodes.append(z_decode)
+
+        decodes = np.stack(decodes).transpose([1, 0, 2, 3, 4])
+        for idx, img in enumerate(decodes):
+            img = np.concatenate([[real1_batch[idx]], img], 0)
+            result = save_image2(img, os.path.join(root_path, 'test{}_interp_D_{}.png'.format(step, idx)), nrow=10+2)
+        return result
+
+    def interpolate_D2(self, real1_batch, real2_batch, step=0, root_path="."):
+        real1_encode = self.encode(real1_batch)
+        print(real1_encode[0,0:10])
+        real2_encode = self.encode(real2_batch)
+        print(real2_encode[0,0:10])
+
+        decodes = []
+        for idx, ratio in enumerate(np.linspace(0, 1, 10)):
+            z = np.stack([slerp(ratio, r1, r2) for r1, r2 in zip(real1_encode, real2_encode)])
+            #print(z[0,1:10])
+            z_decode = self.decode(z)
+            #test_image=Image.fromarray(np.asarray(z_decode[0,:,:,:],dtype='uint8'))
+            #test_image.show()
+            decodes.append(z_decode)
+
+        decodes = np.stack(decodes).transpose([1, 0, 2, 3, 4])
+        for idx, img in enumerate(decodes):
+            img = np.concatenate([[real1_batch[idx]], img, [real2_batch[idx]]], 0)
+            result = save_image2(img, os.path.join(root_path, 'test{}_interp_D_{}.png'.format(step, idx)), nrow=10+2)
+        return result
+
     def test(self):
         root_path = "./"#self.model_dir
 
         all_G_z = None
-        for step in range(3):
+        for step in range(1):
             real1_batch = self.get_image_from_loader()
             real2_batch = self.get_image_from_loader()
 
@@ -328,11 +394,11 @@ class Trainer(object):
             self.autoencode(
                     real1_batch, self.model_dir, idx=os.path.join(root_path, "test{}_real1".format(step)))
             self.autoencode(
-                    real2_batch, self.model_dir, idx=os.path.join(root_path, "test{}_real2".format(step)))
+                   real2_batch, self.model_dir, idx=os.path.join(root_path, "test{}_real2".format(step)))
 
             self.interpolate_G(real1_batch, step, root_path)
-            #self.interpolate_D(real1_batch, real2_batch, step, root_path)
-
+            self.interpolate_D(real1_batch, real2_batch, step, root_path)
+            
             z_fixed = np.random.uniform(-1, 1, size=(self.batch_size, self.z_num))
             G_z = self.generate(z_fixed, path=os.path.join(root_path, "test{}_G_z.png".format(step)))
 
@@ -344,6 +410,111 @@ class Trainer(object):
 
         save_image(all_G_z, '{}/all_G_z.png'.format(root_path), nrow=16)
 
+    def string2image(self,imagestring):
+        first_coma=imagestring.find(',')
+        img_bytes=base64.decodestring(imagestring[first_coma:])
+        image=np.asarray(bytearray(img_bytes),dtype='uint8')
+        image=cv2.imdecode(image,cv2.IMREAD_COLOR)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        #print (image)
+        image=Image.fromarray(image)#,'RGB')
+        if image.mode!='RGB':
+            image=image.convert('RGB')
+
+        longersize = max(image.size)
+        print(longersize)
+        background = Image.new('RGB', (longersize, longersize), "white")
+        background.paste(image, (int((longersize-image.size[0])/2), int((longersize-image.size[1])/2)))
+        image = background
+
+        #img.save('test.jpg')
+        image = np.array(
+            image.resize((128, 128), Image.BICUBIC))
+        print('pass image resize')
+        return image
+
+
+    def test2(self,image0,image1):
+        #print(image0)
+        #print('-----')
+        #print(image1)
+        img0=self.string2image(image0)         #string1=base64.encodestring(imagestring0)
+        img1=self.string2image(image1)
+        root_path = "./"  #self.model_dir
+
+        #all_G_z = None
+        #for step in range(1):
+        #real1_batch = self.get_image_from_loader()
+        #real2_batch = self.get_image_from_loader()
+        image0=np.expand_dims(img0, axis=0)
+        ##image0=np.transpose(image0,[0, 3, 1, 2])
+        image1=np.expand_dims(img1, axis=0)
+        #image1=np.transpose(image1,[0, 3, 1, 2])
+
+        #save_image(image0, os.path.join(root_path, 'test{}_real1.png'.format(step)))
+        #save_image(image1, os.path.join(root_path, 'test{}_real2.png'.format(step)))
+
+        #self.autoencode(
+            #       real1_batch, self.model_dir, idx=os.path.join(root_path, "test{}_real1".format(step)))
+        #self.autoencode(
+            #      real2_batch, self.model_dir, idx=os.path.join(root_path, "test{}_real2".format(step)))
+
+        #self.interpolate_G(real1_batch, step, root_path)
+        imagestring=self.interpolate_D2(image0, image1, 0, root_path)
+        return imagestring
+
+
+    def test3(self, img0, dim, max_range):
+        #print(image0)
+        #print('-----')
+        #print(image1)
+        #img0=self.string2image(image0)
+        #img1=self.string2image(image1)
+        root_path = "./"  #self.model_dir
+
+        #all_G_z = None
+        #for step in range(1):
+        img0=self.string2image(img0)
+        image0=np.expand_dims(img0, axis=0)
+        #image0 = self.get_image_from_loader()
+        #real2_batch = self.get_image_from_loader()
+        #image0=np.expand_dims(real1_batch, axis=0)
+        #image0 = image0.transpose([0, 3, 1, 2])
+        #image1=np.expand_dims(img1, axis=0)
+        #image1=np.transpose(image1,[0, 3, 1, 2])
+
+        #save_image(image0, os.path.join(root_path, 'test{}_real1.png'.format(step)))
+        #save_image(image1, os.path.join(root_path, 'test{}_real2.png'.format(step)))
+
+        #self.autoencode(
+            #       real1_batch, self.model_dir, idx=os.path.join(root_path, "test{}_real1".format(step)))
+        #self.autoencode(
+            #      real2_batch, self.model_dir, idx=os.path.join(root_path, "test{}_real2".format(step)))
+
+        #self.interpolate_G(real1_batch, step, root_path)
+        imagestring=self.interpolate_D3(image0, 0, root_path, dim, 8, max_range)
+        return imagestring
+
+    def test4(self, path):
+        filelist = glob(path)
+        all_latent_vector=[]
+        for index, item in enumerate(filelist):
+            img=Image.open(item)
+            img=img.resize((128,128),Image.BICUBIC)
+            img=np.expand_dims(img, axis=0)
+            latent_vector = self.encode(img)
+            #print(latent_vector)
+            all_latent_vector.append(latent_vector)
+            if index % 2 == 0:
+                mean_latent_vector  = np.mean(all_latent_vector,axis=0)
+                #print(mean_latent_vector)
+                print(index)
+                z_decode = self.decode(mean_latent_vector)
+                filename=str(index)+'.jpg'
+                save_image(z_decode,filename)
+
+
+        
     def get_image_from_loader(self):
         x = self.data_loader.eval(session=self.sess)
         if self.data_format == 'NCHW':
